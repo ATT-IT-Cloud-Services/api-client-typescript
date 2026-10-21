@@ -3,33 +3,141 @@ name: Build
 
 on:
   push:
-    branches: [main, master]
+    branches: [main]
   pull_request:
-    branches: [main, master]
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
   group: build-${{ github.ref }}
   cancel-in-progress: true
 
+permissions:
+  contents: read
+
 jobs:
   build:
-    uses: ./.github/workflows/reusable-build.yml
-    with:
-      project-dir: .
+    name: Build & test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install
+        run: |
+          if [ -f package-lock.json ]; then npm ci; else npm install; fi
+
+      - name: Build
+        run: npm run build
+
+      - name: Verify no localized runtime strings in src
+        run: |
+          if rg -n '"[^"]*(?:Bitte|Fehler| erfolgreich| nicht verfügbar)"' src/ 2>/dev/null; then
+            echo "Localized UI strings found in public API client src/" >&2
+            exit 1
+          fi
+          echo "OK — no obvious localized strings in src/"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ignite-api-dist
+          path: dist
+          retention-days: 5
 
   publish:
+    name: Publish GitHub Package
     needs: build
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    uses: ./.github/workflows/reusable-publish.yml
-    with:
-      project-dir: .
-    secrets: inherit
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          registry-url: https://npm.pkg.github.com
+          scope: "@att-it-cloud-services"
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ignite-api-dist
+          path: dist
+
+      # GitHub Packages rejects republishing the same version (E409).
+      # Append the workflow run id so each sync publishes a unique prerelease.
+      - name: Set unique publish version
+        run: |
+          BASE=$(node -p "require('./package.json').version.split('-')[0]")
+          VERSION="${BASE}-${{ github.run_id }}"
+          npm pkg set "name=@att-it-cloud-services/api-client"
+          npm pkg set "version=${VERSION}"
+          echo "Publishing @att-it-cloud-services/api-client@${VERSION}"
+
+      - name: Publish to GitHub Packages
+        run: npm publish --ignore-scripts
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   release:
+    name: Publish GitHub release
     needs: build
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
-    uses: ./.github/workflows/reusable-github-release.yml
-    with:
-      project-dir: .
-    secrets: inherit
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: ignite-api-dist
+          path: dist
+
+      - name: Resolve release metadata
+        id: meta
+        env:
+          GITHUB_SHA: ${{ github.sha }}
+        run: |
+          TAG=$(node -e "import('./scripts/resolve-app-version.mjs').then(m => console.log(m.resolveReleaseTag()))")
+          TITLE=$(node -e "import('./scripts/resolve-app-version.mjs').then(m => console.log(m.resolveReleaseTitle('ignite-api')))")
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+          echo "title=${TITLE}" >> "$GITHUB_OUTPUT"
+
+      - name: Prepare release files
+        run: |
+          chmod +x scripts/prepare-release-assets.sh
+          scripts/prepare-release-assets.sh "$PWD" "$GITHUB_WORKSPACE/release-upload"
+
+      - name: Create GitHub release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.meta.outputs.tag }}
+          name: ${{ steps.meta.outputs.title }}
+          generate_release_notes: true
+          make_latest: true
+          overwrite_files: true
+          fail_on_unmatched_files: false
+          body: |
+            Automated **ignite-api** build from [`${{ github.sha }}`](${{ github.server_url }}/${{ github.repository }}/commit/${{ github.sha }}).
+
+            ### Downloads
+
+            | File | Description |
+            |---|---|
+            | `ignite-api-*.tgz` | npm package (`npm install ./ignite-api-*.tgz`) |
+            | `ignite-api-*-dist.zip` | Compiled `dist/`, README, LICENSE |
+
+            Also published to GitHub Packages as `@att-it-cloud-services/api-client`.
+          files: release-upload/*

@@ -62,6 +62,6 @@ jobs:
             | `ignite-api-*.tgz` | npm package (`npm install ./ignite-api-*.tgz`) |
             | `ignite-api-*-dist.zip` | Compiled `dist/`, README, LICENSE |
 
-            Also published to GitHub Packages as `@elizonapp/api-client`.
+            Also published to GitHub Packages as `@att-it-cloud-services/api-client`.
           files: |
             release-upload/*

@@ -24,7 +24,7 @@ jobs:
         with:
           node-version: "22"
           registry-url: https://npm.pkg.github.com
-          scope: "@elizonapp"
+          scope: "@att-it-cloud-services"
 
       - name: Download build artifact
         uses: actions/download-artifact@v6
@@ -38,10 +38,11 @@ jobs:
         run: |
           BASE=$(node -p "require('./package.json').version.split('-')[0]")
           VERSION="${BASE}-${{ github.run_id }}"
+          npm pkg set "name=@att-it-cloud-services/api-client"
           npm pkg set "version=${VERSION}"
-          echo "Publishing @elizonapp/api-client@${VERSION}"
+          echo "Publishing @att-it-cloud-services/api-client@${VERSION}"
 
       - name: Publish to GitHub Packages
-        run: npm publish --access public --ignore-scripts
+        run: npm publish --ignore-scripts
         env:
           NODE_AUTH_TOKEN: ${{ secrets.GITHUB_TOKEN }}

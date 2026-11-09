@@ -24,7 +24,13 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "26.13.0"
+
+      # npm is pinned alongside Node: setup-node installs the npm bundled with
+      # the runtime, so without this step the CLI would drift from the version
+      # the lockfile and the publish path were verified against.
+      - name: Pin npm
+        run: npm install -g npm@12.2.2
 
       - name: Install
         run: |
@@ -60,9 +66,12 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "26.13.0"
           registry-url: https://npm.pkg.github.com
           scope: "@att-it-cloud-services"
+
+      - name: Pin npm
+        run: npm install -g npm@12.2.2
 
       - name: Download build artifact
         uses: actions/download-artifact@v4
@@ -97,7 +106,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: "22"
+          node-version: "26.13.0"
 
       - name: Download build artifact
         uses: actions/download-artifact@v4
